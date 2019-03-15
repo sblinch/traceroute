@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/aeden/traceroute"
 	"net"
+	"github.com/sblinch/traceroute"
+	"context"
+	"sync"
 )
 
 func printHop(hop traceroute.TracerouteHop) {
@@ -20,10 +22,6 @@ func printHop(hop traceroute.TracerouteHop) {
 	}
 }
 
-func address(address [4]byte) string {
-	return fmt.Sprintf("%v.%v.%v.%v", address[0], address[1], address[2], address[3])
-}
-
 func main() {
 	var m = flag.Int("m", traceroute.DEFAULT_MAX_HOPS, `Set the max time-to-live (max number of hops) used in outgoing probe packets (default is 64)`)
 	var f = flag.Int("f", traceroute.DEFAULT_FIRST_HOP, `Set the first used time-to-live, e.g. the first hop (default is 1)`)
@@ -31,20 +29,24 @@ func main() {
 
 	flag.Parse()
 	host := flag.Arg(0)
-	options := traceroute.TracerouteOptions{}
-	options.SetRetries(*q - 1)
-	options.SetMaxHops(*m + 1)
-	options.SetFirstHop(*f)
+	options := traceroute.NewTracerouteOptions()
+	options.Retries = *q - 1
+	options.MaxHops = *m + 1
+	options.FirstHop = *f
 
 	ipAddr, err := net.ResolveIPAddr("ip", host)
 	if err != nil {
 		return
 	}
 
-	fmt.Printf("traceroute to %v (%v), %v hops max, %v byte packets\n", host, ipAddr, options.MaxHops(), options.PacketSize())
+	fmt.Printf("traceroute to %v (%v), %v hops max, %v byte packets\n", host, ipAddr, options.MaxHops, options.PacketSize)
 
-	c := make(chan traceroute.TracerouteHop, 0)
+	c := make(chan traceroute.TracerouteHop)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			hop, ok := <-c
 			if !ok {
@@ -55,8 +57,9 @@ func main() {
 		}
 	}()
 
-	_, err = traceroute.Traceroute(host, &options, c)
+	_, err = traceroute.Traceroute(context.Background(), host, options, c)
 	if err != nil {
 		fmt.Printf("Error: ", err)
 	}
+	wg.Wait()
 }
